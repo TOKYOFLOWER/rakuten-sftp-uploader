@@ -116,9 +116,19 @@ def execute_now():
             filename = schedule[1]
             
             try:
-                # SFTP接続
+                # SFTP接続（楽天対応版）
                 transport = paramiko.Transport((ftp_host, 22))
-                transport.connect(username=ftp_user, password=ftp_pass)
+                
+                # ホストキーの自動承認（本番環境では要注意）
+                transport.get_remote_server_key()
+                
+                # セキュリティオプションを設定
+                transport.connect(
+                    username=ftp_user, 
+                    password=ftp_pass,
+                    hostkey=None
+                )
+                
                 sftp = paramiko.SFTPClient.from_transport(transport)
                 
                 # ファイルアップロード
@@ -133,6 +143,18 @@ def execute_now():
                 conn.commit()
                 
                 results.append(f'✓ {filename} アップロード完了')
+                
+            except paramiko.AuthenticationException as e:
+                error_msg = f'認証エラー: ユーザー名またはパスワードが間違っています'
+                c.execute('UPDATE schedules SET status = ? WHERE id = ?', (error_msg, schedule_id))
+                conn.commit()
+                results.append(f'✗ {filename} {error_msg}')
+                
+            except paramiko.SSHException as e:
+                error_msg = f'SSH接続エラー: {str(e)}'
+                c.execute('UPDATE schedules SET status = ? WHERE id = ?', (error_msg, schedule_id))
+                conn.commit()
+                results.append(f'✗ {filename} {error_msg}')
                 
             except Exception as e:
                 error_msg = f'error: {str(e)}'
