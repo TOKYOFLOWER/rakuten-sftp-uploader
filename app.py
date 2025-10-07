@@ -115,34 +115,34 @@ def execute_now():
             ftp_path = schedule[6]
             filename = schedule[1]
             
+            transport = None
+            sftp = None
+            
             try:
-                # SFTP接続（楽天対応版）
+                # SFTP接続
                 transport = paramiko.Transport((ftp_host, 22))
                 
-                # ホストキーの自動承認（本番環境では要注意）
-                transport.get_remote_server_key()
+                # ホストキーポリシーを設定（自動承認）
+                transport.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 
-                # セキュリティオプションを設定
-                transport.connect(
-                    username=ftp_user, 
-                    password=ftp_pass,
-                    hostkey=None
-                )
+                # 接続
+                transport.connect(username=ftp_user, password=ftp_pass)
                 
+                # SFTPクライアント作成
                 sftp = paramiko.SFTPClient.from_transport(transport)
                 
                 # ファイルアップロード
                 remote_path = ftp_path.rstrip('/') + '/' + filename
+                
+                # ファイルをアップロード
                 sftp.put(filepath, remote_path)
                 
-                sftp.close()
-                transport.close()
+                # 正常終了
+                results.append(f'✓ {filename} アップロード完了')
                 
                 # ステータス更新
                 c.execute('UPDATE schedules SET status = "completed" WHERE id = ?', (schedule_id,))
                 conn.commit()
-                
-                results.append(f'✓ {filename} アップロード完了')
                 
             except paramiko.AuthenticationException as e:
                 error_msg = f'認証エラー: ユーザー名またはパスワードが間違っています'
@@ -150,17 +150,24 @@ def execute_now():
                 conn.commit()
                 results.append(f'✗ {filename} {error_msg}')
                 
-            except paramiko.SSHException as e:
-                error_msg = f'SSH接続エラー: {str(e)}'
+            except Exception as e:
+                error_msg = f'エラー: {str(e)}'
                 c.execute('UPDATE schedules SET status = ? WHERE id = ?', (error_msg, schedule_id))
                 conn.commit()
                 results.append(f'✗ {filename} {error_msg}')
                 
-            except Exception as e:
-                error_msg = f'error: {str(e)}'
-                c.execute('UPDATE schedules SET status = ? WHERE id = ?', (error_msg, schedule_id))
-                conn.commit()
-                results.append(f'✗ {filename} エラー: {str(e)}')
+            finally:
+                # 接続を確実にクローズ
+                try:
+                    if sftp:
+                        sftp.close()
+                except:
+                    pass
+                try:
+                    if transport:
+                        transport.close()
+                except:
+                    pass
         
         conn.close()
         
