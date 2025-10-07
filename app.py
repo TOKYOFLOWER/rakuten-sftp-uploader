@@ -126,19 +126,27 @@ def execute_now():
             sftp = None
             
             try:
-                # SSHクライアントを使用
+# SSHクライアントを使用
                 ssh = paramiko.SSHClient()
                 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 
-                # ★★★ 接続パラメータを明示 ★★★
+                # ★★★ keyboard-interactive認証にも対応 ★★★
+                def handler(title, instructions, prompt_list):
+                    if len(prompt_list) > 0:
+                        return [ftp_pass.strip()]
+                    return []
+                
                 ssh.connect(
-                    hostname=ftp_host.strip(),  # 前後の空白を削除
+                    hostname=ftp_host.strip(),
                     port=22,
-                    username=ftp_user.strip(),  # 前後の空白を削除
-                    password=ftp_pass.strip(),  # 前後の空白を削除
+                    username=ftp_user.strip(),
+                    password=ftp_pass.strip(),
                     timeout=30,
-                    look_for_keys=False,  # SSH鍵を使わない
-                    allow_agent=False     # SSH agentを使わない
+                    look_for_keys=False,
+                    allow_agent=False,
+                    auth_timeout=30,
+                    banner_timeout=30,
+                    disabled_algorithms={'pubkeys': ['rsa-sha2-256', 'rsa-sha2-512']}  # 古いアルゴリズムを許可
                 )
                 
                 sftp = ssh.open_sftp()
