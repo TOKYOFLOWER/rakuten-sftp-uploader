@@ -115,26 +115,30 @@ def execute_now():
             ftp_path = schedule[6]
             filename = schedule[1]
             
-            transport = None
+            ssh = None
             sftp = None
             
             try:
-                # SFTP接続
-                transport = paramiko.Transport((ftp_host, 22))
+                # SSHクライアントを使用（よりシンプル）
+                ssh = paramiko.SSHClient()
                 
-                # ホストキーポリシーを設定（自動承認）
-                transport.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                # ホストキーを自動承認
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 
                 # 接続
-                transport.connect(username=ftp_user, password=ftp_pass)
+                ssh.connect(
+                    hostname=ftp_host,
+                    port=22,
+                    username=ftp_user,
+                    password=ftp_pass,
+                    timeout=30
+                )
                 
-                # SFTPクライアント作成
-                sftp = paramiko.SFTPClient.from_transport(transport)
+                # SFTPセッション開始
+                sftp = ssh.open_sftp()
                 
                 # ファイルアップロード
                 remote_path = ftp_path.rstrip('/') + '/' + filename
-                
-                # ファイルをアップロード
                 sftp.put(filepath, remote_path)
                 
                 # 正常終了
@@ -145,7 +149,7 @@ def execute_now():
                 conn.commit()
                 
             except paramiko.AuthenticationException as e:
-                error_msg = f'認証エラー: ユーザー名またはパスワードが間違っています'
+                error_msg = f'認証エラー: {str(e)}'
                 c.execute('UPDATE schedules SET status = ? WHERE id = ?', (error_msg, schedule_id))
                 conn.commit()
                 results.append(f'✗ {filename} {error_msg}')
@@ -164,8 +168,8 @@ def execute_now():
                 except:
                     pass
                 try:
-                    if transport:
-                        transport.close()
+                    if ssh:
+                        ssh.close()
                 except:
                     pass
         
