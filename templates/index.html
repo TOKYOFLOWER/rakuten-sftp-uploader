@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>楽天FTPアップロードスケジューラー</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 700px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #bf0000;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+        button:hover {
+            background-color: #9a0000;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        #executeNowBtn {
+            background-color: #28a745;
+            margin-bottom: 20px;
+        }
+        #executeNowBtn:hover {
+            background-color: #218838;
+        }
+        .message {
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 4px;
+            white-space: pre-line;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .schedule-list {
+            margin-top: 40px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <h2>楽天FTPアップロードスケジューラー</h2>
+    
+    <form id="uploadForm" enctype="multipart/form-data">
+        <div class="form-group">
+            <label>CSVファイル</label>
+            <input type="file" name="csvfile" id="csvfile" accept=".csv" required>
+        </div>
+        
+        <div class="form-group">
+            <label>アップロード日時</label>
+            <input type="datetime-local" name="schedule_time" id="schedule_time" required>
+        </div>
+        
+        <div class="form-group">
+            <label>FTPホスト</label>
+            <input type="text" name="ftp_host" id="ftp_host" value="upload.rakuten.ne.jp" required>
+        </div>
+        
+        <div class="form-group">
+            <label>FTPユーザー名</label>
+            <input type="text" name="ftp_user" id="ftp_user" required>
+        </div>
+        
+        <div class="form-group">
+            <label>FTPパスワード</label>
+            <input type="password" name="ftp_pass" id="ftp_pass" required>
+        </div>
+        
+        <div class="form-group">
+            <label>アップロード先パス</label>
+            <input type="text" name="ftp_path" id="ftp_path" value="/ritem/batch" required>
+        </div>
+        
+        <button type="submit" id="submitBtn">スケジュール設定</button>
+    </form>
+    
+    <div id="message"></div>
+    
+    <div class="schedule-list">
+        <h3>予約一覧</h3>
+        
+        <button id="executeNowBtn">今すぐアップロード実行</button>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>ファイル名</th>
+                    <th>予約時刻</th>
+                    <th>ステータス</th>
+                </tr>
+            </thead>
+            <tbody id="scheduleBody">
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = '処理中...';
+            
+            const formData = new FormData(this);
+            
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                const messageDiv = document.getElementById('message');
+                messageDiv.className = 'message ' + (result.success ? 'success' : 'error');
+                messageDiv.textContent = result.message;
+                
+                if (result.success) {
+                    this.reset();
+                    loadSchedules();
+                }
+            } catch (error) {
+                document.getElementById('message').className = 'message error';
+                document.getElementById('message').textContent = 'エラー: ' + error;
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'スケジュール設定';
+            }
+        });
+        
+        document.getElementById('executeNowBtn').addEventListener('click', async function() {
+            if (!confirm('予約中のファイルを今すぐアップロードしますか？')) {
+                return;
+            }
+            
+            this.disabled = true;
+            this.textContent = '実行中...';
+            
+            try {
+                const response = await fetch('/execute_now', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                const messageDiv = document.getElementById('message');
+                messageDiv.className = 'message ' + (result.success ? 'success' : 'error');
+                messageDiv.textContent = result.message;
+                
+                if (result.success) {
+                    loadSchedules();
+                }
+            } catch (error) {
+                document.getElementById('message').className = 'message error';
+                document.getElementById('message').textContent = 'エラー: ' + error;
+            } finally {
+                this.disabled = false;
+                this.textContent = '今すぐアップロード実行';
+            }
+        });
+        
+        async function loadSchedules() {
+            try {
+                const response = await fetch('/schedules');
+                const schedules = await response.json();
+                
+                const tbody = document.getElementById('scheduleBody');
+                tbody.innerHTML = '';
+                
+                schedules.forEach(schedule => {
+                    const row = tbody.insertRow();
+                    row.insertCell(0).textContent = schedule.filename;
+                    row.insertCell(1).textContent = schedule.schedule_time;
+                    row.insertCell(2).textContent = schedule.status;
+                });
+            } catch (error) {
+                console.error('予約一覧の取得に失敗:', error);
+            }
+        }
+        
+        loadSchedules();
+        setInterval(loadSchedules, 30000);
+    </script>
+</body>
+</html>
