@@ -106,6 +106,10 @@ def execute_now():
         
         results = []
         
+        # ★★★ デバッグ用ログ追加 ★★★
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+        
         for schedule in schedules:
             schedule_id = schedule[0]
             filepath = schedule[2]
@@ -115,53 +119,51 @@ def execute_now():
             ftp_path = schedule[6]
             filename = schedule[1]
             
+            # ★★★ 接続情報をログ出力（パスワードは伏せる） ★★★
+            logging.debug(f"接続試行: host={ftp_host}, user={ftp_user}, user_len={len(ftp_user)}, pass_len={len(ftp_pass)}, path={ftp_path}")
+            
             ssh = None
             sftp = None
             
             try:
-                # SSHクライアントを使用（よりシンプル）
+                # SSHクライアントを使用
                 ssh = paramiko.SSHClient()
-                
-                # ホストキーを自動承認
                 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 
-                # 接続
+                # ★★★ 接続パラメータを明示 ★★★
                 ssh.connect(
-                    hostname=ftp_host,
+                    hostname=ftp_host.strip(),  # 前後の空白を削除
                     port=22,
-                    username=ftp_user,
-                    password=ftp_pass,
-                    timeout=30
+                    username=ftp_user.strip(),  # 前後の空白を削除
+                    password=ftp_pass.strip(),  # 前後の空白を削除
+                    timeout=30,
+                    look_for_keys=False,  # SSH鍵を使わない
+                    allow_agent=False     # SSH agentを使わない
                 )
                 
-                # SFTPセッション開始
                 sftp = ssh.open_sftp()
-                
-                # ファイルアップロード
                 remote_path = ftp_path.rstrip('/') + '/' + filename
                 sftp.put(filepath, remote_path)
                 
-                # 正常終了
                 results.append(f'✓ {filename} アップロード完了')
-                
-                # ステータス更新
                 c.execute('UPDATE schedules SET status = "completed" WHERE id = ?', (schedule_id,))
                 conn.commit()
                 
             except paramiko.AuthenticationException as e:
                 error_msg = f'認証エラー: {str(e)}'
+                logging.error(f"Authentication failed for user={ftp_user.strip()}, host={ftp_host.strip()}")
                 c.execute('UPDATE schedules SET status = ? WHERE id = ?', (error_msg, schedule_id))
                 conn.commit()
                 results.append(f'✗ {filename} {error_msg}')
                 
             except Exception as e:
                 error_msg = f'エラー: {str(e)}'
+                logging.error(f"Connection error: {str(e)}")
                 c.execute('UPDATE schedules SET status = ? WHERE id = ?', (error_msg, schedule_id))
                 conn.commit()
                 results.append(f'✗ {filename} {error_msg}')
                 
             finally:
-                # 接続を確実にクローズ
                 try:
                     if sftp:
                         sftp.close()
