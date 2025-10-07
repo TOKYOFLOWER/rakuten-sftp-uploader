@@ -1,7 +1,6 @@
-from flask import Flask, render_template, request, jsonify, send_file
-import paramiko
+from flask import Flask, render_template, request, jsonify
+import pysftp
 import os
-import json
 from datetime import datetime
 import sqlite3
 from werkzeug.utils import secure_filename
@@ -106,10 +105,6 @@ def execute_now():
         
         results = []
         
-        # ★★★ デバッグ用ログ追加 ★★★
-        import logging
-        logging.basicConfig(level=logging.DEBUG)
-        
         for schedule in schedules:
             schedule_id = schedule[0]
             filepath = schedule[2]
@@ -119,69 +114,34 @@ def execute_now():
             ftp_path = schedule[6]
             filename = schedule[1]
             
-            # ★★★ 接続情報をログ出力（パスワードは伏せる） ★★★
-            logging.debug(f"接続試行: host={ftp_host}, user={ftp_user}, user_len={len(ftp_user)}, pass_len={len(ftp_pass)}, path={ftp_path}")
-            
-            ssh = None
-            sftp = None
-            
             try:
-# SSHクライアントを使用
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                # pysftpで接続（ホストキー検証を無効化）
+                cnopts = pysftp.CnOpts()
+                cnopts.hostkeys = None
                 
-                # ★★★ keyboard-interactive認証にも対応 ★★★
-                def handler(title, instructions, prompt_list):
-                    if len(prompt_list) > 0:
-                        return [ftp_pass.strip()]
-                    return []
-                
-                ssh.connect(
-                    hostname=ftp_host.strip(),
-                    port=22,
+                with pysftp.Connection(
+                    host=ftp_host.strip(),
                     username=ftp_user.strip(),
                     password=ftp_pass.strip(),
-                    timeout=30,
-                    look_for_keys=False,
-                    allow_agent=False,
-                    auth_timeout=30,
-                    banner_timeout=30,
-                    disabled_algorithms={'pubkeys': ['rsa-sha2-256', 'rsa-sha2-512']}  # 古いアルゴリズムを許可
-                )
+                    port=22,
+                    cnopts=cnopts
+                ) as sftp:
+                    # ディレクトリに移動
+                    sftp.cwd(ftp_path.strip())
+                    
+                    # ファイルをアップロード
+                    sftp.put(filepath, filename)
                 
-                sftp = ssh.open_sftp()
-                remote_path = ftp_path.rstrip('/') + '/' + filename
-                sftp.put(filepath, remote_path)
-                
+                # 成功
                 results.append(f'✓ {filename} アップロード完了')
                 c.execute('UPDATE schedules SET status = "completed" WHERE id = ?', (schedule_id,))
                 conn.commit()
                 
-            except paramiko.AuthenticationException as e:
-                error_msg = f'認証エラー: {str(e)}'
-                logging.error(f"Authentication failed for user={ftp_user.strip()}, host={ftp_host.strip()}")
-                c.execute('UPDATE schedules SET status = ? WHERE id = ?', (error_msg, schedule_id))
-                conn.commit()
-                results.append(f'✗ {filename} {error_msg}')
-                
             except Exception as e:
                 error_msg = f'エラー: {str(e)}'
-                logging.error(f"Connection error: {str(e)}")
                 c.execute('UPDATE schedules SET status = ? WHERE id = ?', (error_msg, schedule_id))
                 conn.commit()
                 results.append(f'✗ {filename} {error_msg}')
-                
-            finally:
-                try:
-                    if sftp:
-                        sftp.close()
-                except:
-                    pass
-                try:
-                    if ssh:
-                        ssh.close()
-                except:
-                    pass
         
         conn.close()
         
