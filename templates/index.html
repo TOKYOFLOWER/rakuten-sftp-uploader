@@ -203,24 +203,37 @@
             }
         });
         
-        async function loadSchedules() {
-            try {
-                const response = await fetch('/schedules');
-                const schedules = await response.json();
-                
-                const tbody = document.getElementById('scheduleBody');
-                tbody.innerHTML = '';
-                
-                schedules.forEach(schedule => {
-                    const row = tbody.insertRow();
-                    row.insertCell(0).textContent = schedule.filename;
-                    row.insertCell(1).textContent = schedule.schedule_time;
-                    row.insertCell(2).textContent = schedule.status;
-                });
-            } catch (error) {
-                console.error('予約一覧の取得に失敗:', error);
+async function loadSchedules() {
+    try {
+        const response = await fetch('/schedules');
+        const schedules = await response.json();
+        
+        const tbody = document.getElementById('scheduleBody');
+        tbody.innerHTML = '';
+        
+        schedules.forEach(schedule => {
+            const row = tbody.insertRow();
+            row.insertCell(0).textContent = schedule.filename;
+            row.insertCell(1).textContent = schedule.schedule_time;
+            
+            // ステータスに応じて色分け
+            const statusCell = row.insertCell(2);
+            statusCell.textContent = schedule.status;
+            
+            if (schedule.status === 'completed') {
+                statusCell.style.color = 'green';
+                statusCell.style.fontWeight = 'bold';
+            } else if (schedule.status === 'pending') {
+                statusCell.style.color = 'orange';
+            } else {
+                statusCell.style.color = 'red';
+                statusCell.style.fontWeight = 'bold';
             }
-        }
+        });
+    } catch (error) {
+        console.error('予約一覧の取得に失敗:', error);
+    }
+}
         
         loadSchedules();
         setInterval(loadSchedules, 30000);
