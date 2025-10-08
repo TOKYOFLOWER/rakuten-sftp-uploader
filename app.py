@@ -36,7 +36,6 @@ def init_db():
 
 init_db()
 
-# スケジュール実行関数
 def check_and_execute_schedules():
     try:
         conn = sqlite3.connect('schedules.db')
@@ -66,6 +65,13 @@ def check_and_execute_schedules():
             ftp_pass = schedule[5]
             ftp_path = schedule[6]
             filename = schedule[1]
+            
+            # ★★★ デバッグ情報を追加 ★★★
+            print(f'[デバッグ] ファイル: {filename}')
+            print(f'[デバッグ] ホスト: {ftp_host}')
+            print(f'[デバッグ] ユーザー: {ftp_user}')
+            print(f'[デバッグ] パスワード長: {len(ftp_pass)} 文字')
+            print(f'[デバッグ] パス: {ftp_path}')
             
             try:
                 cnopts = pysftp.CnOpts()
