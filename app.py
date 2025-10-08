@@ -6,12 +6,16 @@ import sqlite3
 from werkzeug.utils import secure_filename
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
+import pytz
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# 日本時間のタイムゾーン
+JST = pytz.timezone('Asia/Tokyo')
 
 # データベース初期化
 def init_db():
@@ -38,27 +42,21 @@ def check_and_execute_schedules():
         conn = sqlite3.connect('schedules.db')
         c = conn.cursor()
         
-        # 現在時刻（デバッグ用出力）
-        now = datetime.now()
-        now_str = now.strftime('%Y-%m-%dT%H:%M')
-        print(f'[スケジューラー] チェック開始: 現在時刻={now_str}')
+        # 現在の日本時間を取得
+        now_jst = datetime.now(JST).strftime('%Y-%m-%dT%H:%M')
         
-        # pendingスケジュールを全て取得してログ出力
-        c.execute('SELECT * FROM schedules WHERE status = "pending"')
-        all_pending = c.fetchall()
-        print(f'[スケジューラー] pending件数: {len(all_pending)}')
-        
-        for p in all_pending:
-            print(f'  - {p[1]}: 予定時刻={p[7]}, 現在との比較={p[7] <= now_str}')
+        print(f'[スケジューラー] 現在時刻（JST）: {now_jst}')
         
         # 現在時刻を過ぎているpendingスケジュールを取得
         c.execute('''SELECT * FROM schedules 
                      WHERE status = "pending" 
                      AND schedule_time <= ?
-                     ORDER BY schedule_time''', (now_str,))
+                     ORDER BY schedule_time''', (now_jst,))
         
         schedules = c.fetchall()
-        print(f'[スケジューラー] 実行対象: {len(schedules)}件')
+        
+        if schedules:
+            print(f'[スケジューラー] 実行対象: {len(schedules)}件')
         
         for schedule in schedules:
             schedule_id = schedule[0]
@@ -68,8 +66,6 @@ def check_and_execute_schedules():
             ftp_pass = schedule[5]
             ftp_path = schedule[6]
             filename = schedule[1]
-            
-            print(f'[スケジューラー] アップロード開始: {filename}')
             
             try:
                 cnopts = pysftp.CnOpts()
@@ -101,7 +97,7 @@ def check_and_execute_schedules():
         print(f'スケジューラーエラー: {str(e)}')
 
 # スケジューラー設定（1分ごとにチェック）
-scheduler = BackgroundScheduler()
+scheduler = BackgroundScheduler(timezone=JST)
 scheduler.add_job(func=check_and_execute_schedules, trigger="interval", minutes=1)
 scheduler.start()
 
@@ -139,9 +135,12 @@ def upload():
         conn.commit()
         conn.close()
         
+        # 現在の日本時間も表示
+        now_jst = datetime.now(JST).strftime('%Y-%m-%d %H:%M')
+        
         return jsonify({
             'success': True,
-            'message': f'{schedule_time} にアップロード予約しました（1分ごとに自動チェックされます）'
+            'message': f'{schedule_time} にアップロード予約しました\n現在時刻（日本時間）: {now_jst}\n1分ごとに自動チェックされます'
         })
         
     except Exception as e:
