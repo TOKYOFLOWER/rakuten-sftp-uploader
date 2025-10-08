@@ -104,6 +104,10 @@ scheduler.start()
 # アプリ終了時にスケジューラーを停止
 atexit.register(lambda: scheduler.shutdown())
 
+print('=' * 50)
+print('🚀 スケジューラーが起動しました')
+print('=' * 50)
+
 @app.route('/')
 def index():
     return render_template('index.html')
