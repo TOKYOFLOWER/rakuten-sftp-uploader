@@ -153,7 +153,8 @@ def upload():
 def schedules():
     conn = sqlite3.connect('schedules.db')
     c = conn.cursor()
-    c.execute('SELECT * FROM schedules WHERE status = "pending" ORDER BY schedule_time')
+    # pending だけでなく全てのスケジュールを表示（最新20件）
+    c.execute('SELECT * FROM schedules ORDER BY id DESC LIMIT 20')
     rows = c.fetchall()
     conn.close()
     
