@@ -38,14 +38,27 @@ def check_and_execute_schedules():
         conn = sqlite3.connect('schedules.db')
         c = conn.cursor()
         
+        # 現在時刻（デバッグ用出力）
+        now = datetime.now()
+        now_str = now.strftime('%Y-%m-%dT%H:%M')
+        print(f'[スケジューラー] チェック開始: 現在時刻={now_str}')
+        
+        # pendingスケジュールを全て取得してログ出力
+        c.execute('SELECT * FROM schedules WHERE status = "pending"')
+        all_pending = c.fetchall()
+        print(f'[スケジューラー] pending件数: {len(all_pending)}')
+        
+        for p in all_pending:
+            print(f'  - {p[1]}: 予定時刻={p[7]}, 現在との比較={p[7] <= now_str}')
+        
         # 現在時刻を過ぎているpendingスケジュールを取得
-        now = datetime.now().strftime('%Y-%m-%dT%H:%M')
         c.execute('''SELECT * FROM schedules 
                      WHERE status = "pending" 
                      AND schedule_time <= ?
-                     ORDER BY schedule_time''', (now,))
+                     ORDER BY schedule_time''', (now_str,))
         
         schedules = c.fetchall()
+        print(f'[スケジューラー] 実行対象: {len(schedules)}件')
         
         for schedule in schedules:
             schedule_id = schedule[0]
@@ -55,6 +68,8 @@ def check_and_execute_schedules():
             ftp_pass = schedule[5]
             ftp_path = schedule[6]
             filename = schedule[1]
+            
+            print(f'[スケジューラー] アップロード開始: {filename}')
             
             try:
                 cnopts = pysftp.CnOpts()
