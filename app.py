@@ -4,12 +4,13 @@ import os
 from datetime import datetime
 import sqlite3
 from werkzeug.utils import secure_filename
+from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
 
-# アップロードフォルダを作成
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # データベース初期化
@@ -31,6 +32,67 @@ def init_db():
 
 init_db()
 
+# スケジュール実行関数
+def check_and_execute_schedules():
+    try:
+        conn = sqlite3.connect('schedules.db')
+        c = conn.cursor()
+        
+        # 現在時刻を過ぎているpendingスケジュールを取得
+        now = datetime.now().strftime('%Y-%m-%dT%H:%M')
+        c.execute('''SELECT * FROM schedules 
+                     WHERE status = "pending" 
+                     AND schedule_time <= ?
+                     ORDER BY schedule_time''', (now,))
+        
+        schedules = c.fetchall()
+        
+        for schedule in schedules:
+            schedule_id = schedule[0]
+            filepath = schedule[2]
+            ftp_host = schedule[3]
+            ftp_user = schedule[4]
+            ftp_pass = schedule[5]
+            ftp_path = schedule[6]
+            filename = schedule[1]
+            
+            try:
+                cnopts = pysftp.CnOpts()
+                cnopts.hostkeys = None
+                
+                with pysftp.Connection(
+                    host=ftp_host.strip(),
+                    username=ftp_user.strip(),
+                    password=ftp_pass.strip(),
+                    port=22,
+                    cnopts=cnopts
+                ) as sftp:
+                    sftp.cwd(ftp_path.strip())
+                    sftp.put(filepath, filename)
+                
+                c.execute('UPDATE schedules SET status = "completed" WHERE id = ?', (schedule_id,))
+                conn.commit()
+                print(f'✓ スケジュール実行成功: {filename}')
+                
+            except Exception as e:
+                error_msg = f'エラー: {str(e)}'
+                c.execute('UPDATE schedules SET status = ? WHERE id = ?', (error_msg, schedule_id))
+                conn.commit()
+                print(f'✗ スケジュール実行失敗: {filename} - {str(e)}')
+        
+        conn.close()
+        
+    except Exception as e:
+        print(f'スケジューラーエラー: {str(e)}')
+
+# スケジューラー設定（1分ごとにチェック）
+scheduler = BackgroundScheduler()
+scheduler.add_job(func=check_and_execute_schedules, trigger="interval", minutes=1)
+scheduler.start()
+
+# アプリ終了時にスケジューラーを停止
+atexit.register(lambda: scheduler.shutdown())
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -38,13 +100,11 @@ def index():
 @app.route('/upload', methods=['POST'])
 def upload():
     try:
-        # ファイル保存
         file = request.files['csvfile']
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        # スケジュール情報を保存
         schedule_time = request.form['schedule_time']
         ftp_host = request.form['ftp_host']
         ftp_user = request.form['ftp_user']
@@ -54,7 +114,7 @@ def upload():
         conn = sqlite3.connect('schedules.db')
         c = conn.cursor()
         
-        # ★★★ 新規追加：古いpending状態のレコードを削除 ★★★
+        # 古いpending状態のレコードを削除
         c.execute('DELETE FROM schedules WHERE status = "pending"')
         
         c.execute('''INSERT INTO schedules
@@ -66,7 +126,7 @@ def upload():
         
         return jsonify({
             'success': True,
-            'message': f'{schedule_time} にアップロード予約しました'
+            'message': f'{schedule_time} にアップロード予約しました（1分ごとに自動チェックされます）'
         })
         
     except Exception as e:
@@ -100,13 +160,11 @@ def execute_now():
         conn = sqlite3.connect('schedules.db')
         c = conn.cursor()
         
-        # 全てのpendingスケジュールを取得
         c.execute('''SELECT * FROM schedules 
                      WHERE status = "pending" 
                      ORDER BY schedule_time''')
         
         schedules = c.fetchall()
-        
         results = []
         
         for schedule in schedules:
@@ -119,7 +177,6 @@ def execute_now():
             filename = schedule[1]
             
             try:
-                # pysftpで接続（ホストキー検証を無効化）
                 cnopts = pysftp.CnOpts()
                 cnopts.hostkeys = None
                 
@@ -130,13 +187,9 @@ def execute_now():
                     port=22,
                     cnopts=cnopts
                 ) as sftp:
-                    # ディレクトリに移動
                     sftp.cwd(ftp_path.strip())
-                    
-                    # ファイルをアップロード
                     sftp.put(filepath, filename)
                 
-                # 成功
                 results.append(f'✓ {filename} アップロード完了')
                 c.execute('UPDATE schedules SET status = "completed" WHERE id = ?', (schedule_id,))
                 conn.commit()
