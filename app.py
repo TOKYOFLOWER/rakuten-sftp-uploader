@@ -5,8 +5,14 @@ from datetime import datetime
 import sqlite3
 from werkzeug.utils import secure_filename
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 import atexit
 import pytz
+import logging
+
+# ロギング設定
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
@@ -36,15 +42,17 @@ def init_db():
 
 init_db()
 
+# スケジュール実行関数
 def check_and_execute_schedules():
     try:
+        logger.info('=' * 60)
+        
         conn = sqlite3.connect('schedules.db')
         c = conn.cursor()
         
         # 現在の日本時間を取得
         now_jst = datetime.now(JST).strftime('%Y-%m-%dT%H:%M')
-        
-        print(f'[スケジューラー] 現在時刻（JST）: {now_jst}')
+        logger.info(f'[スケジューラー] 現在時刻（JST）: {now_jst}')
         
         # 現在時刻を過ぎているpendingスケジュールを取得
         c.execute('''SELECT * FROM schedules 
@@ -55,7 +63,9 @@ def check_and_execute_schedules():
         schedules = c.fetchall()
         
         if schedules:
-            print(f'[スケジューラー] 実行対象: {len(schedules)}件')
+            logger.info(f'[スケジューラー] 実行対象: {len(schedules)}件')
+        else:
+            logger.info('[スケジューラー] 実行対象なし')
         
         for schedule in schedules:
             schedule_id = schedule[0]
@@ -66,12 +76,11 @@ def check_and_execute_schedules():
             ftp_path = schedule[6]
             filename = schedule[1]
             
-            # ★★★ デバッグ情報を追加 ★★★
-            print(f'[デバッグ] ファイル: {filename}')
-            print(f'[デバッグ] ホスト: {ftp_host}')
-            print(f'[デバッグ] ユーザー: {ftp_user}')
-            print(f'[デバッグ] パスワード長: {len(ftp_pass)} 文字')
-            print(f'[デバッグ] パス: {ftp_path}')
+            logger.info(f'[デバッグ] ファイル: {filename}')
+            logger.info(f'[デバッグ] ホスト: {ftp_host}')
+            logger.info(f'[デバッグ] ユーザー: {ftp_user}')
+            logger.info(f'[デバッグ] パスワード長: {len(ftp_pass)} 文字')
+            logger.info(f'[デバッグ] パス: {ftp_path}')
             
             try:
                 cnopts = pysftp.CnOpts()
@@ -89,30 +98,35 @@ def check_and_execute_schedules():
                 
                 c.execute('UPDATE schedules SET status = "completed" WHERE id = ?', (schedule_id,))
                 conn.commit()
-                print(f'✓ スケジュール実行成功: {filename}')
+                logger.info(f'✓ スケジュール実行成功: {filename}')
                 
             except Exception as e:
                 error_msg = f'エラー: {str(e)}'
                 c.execute('UPDATE schedules SET status = ? WHERE id = ?', (error_msg, schedule_id))
                 conn.commit()
-                print(f'✗ スケジュール実行失敗: {filename} - {str(e)}')
+                logger.error(f'✗ スケジュール実行失敗: {filename} - {str(e)}')
         
         conn.close()
+        logger.info('=' * 60)
         
     except Exception as e:
-        print(f'スケジューラーエラー: {str(e)}')
+        logger.error(f'スケジューラーエラー: {str(e)}', exc_info=True)
 
-# スケジューラー設定（1分ごとにチェック）
+# スケジューラー設定
+logger.info('🚀 スケジューラーを初期化中...')
 scheduler = BackgroundScheduler(timezone=JST)
-scheduler.add_job(func=check_and_execute_schedules, trigger="interval", minutes=1)
+scheduler.add_job(
+    func=check_and_execute_schedules,
+    trigger=IntervalTrigger(minutes=1),
+    id='check_schedules',
+    name='スケジュールチェック',
+    replace_existing=True
+)
 scheduler.start()
+logger.info('✅ スケジューラーが起動しました')
 
 # アプリ終了時にスケジューラーを停止
 atexit.register(lambda: scheduler.shutdown())
-
-print('=' * 50)
-print('🚀 スケジューラーが起動しました')
-print('=' * 50)
 
 @app.route('/')
 def index():
@@ -148,12 +162,15 @@ def upload():
         # 現在の日本時間も表示
         now_jst = datetime.now(JST).strftime('%Y-%m-%d %H:%M')
         
+        logger.info(f'新規スケジュール登録: {filename} at {schedule_time}')
+        
         return jsonify({
             'success': True,
             'message': f'{schedule_time} にアップロード予約しました\n現在時刻（日本時間）: {now_jst}\n1分ごとに自動チェックされます'
         })
         
     except Exception as e:
+        logger.error(f'アップロードエラー: {str(e)}')
         return jsonify({
             'success': False,
             'message': str(e)
@@ -163,7 +180,6 @@ def upload():
 def schedules():
     conn = sqlite3.connect('schedules.db')
     c = conn.cursor()
-    # pending だけでなく全てのスケジュールを表示（最新20件）
     c.execute('SELECT * FROM schedules ORDER BY id DESC LIMIT 20')
     rows = c.fetchall()
     conn.close()
@@ -246,4 +262,5 @@ def execute_now():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
+    logger.info(f'🌐 アプリケーションをポート {port} で起動')
     app.run(host='0.0.0.0', port=port)
