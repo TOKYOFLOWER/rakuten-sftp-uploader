@@ -53,6 +53,10 @@ def upload():
         
         conn = sqlite3.connect('schedules.db')
         c = conn.cursor()
+        
+        # ★★★ 新規追加：古いpending状態のレコードを削除 ★★★
+        c.execute('DELETE FROM schedules WHERE status = "pending"')
+        
         c.execute('''INSERT INTO schedules
                      (filename, filepath, ftp_host, ftp_user, ftp_pass, ftp_path, schedule_time, status)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
