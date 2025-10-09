@@ -9,7 +9,6 @@ from apscheduler.triggers.interval import IntervalTrigger
 import atexit
 import pytz
 import logging
-import time
 
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
@@ -23,42 +22,6 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # 日本時間のタイムゾーン
 JST = pytz.timezone('Asia/Tokyo')
-
-# リトライ機能付きアップロード関数
-def upload_with_retry(ftp_host, ftp_user, ftp_pass, ftp_path, filepath, filename, max_retries=3):
-    """リトライ機能付きアップロード"""
-    for attempt in range(max_retries):
-        try:
-            logger.info(f'[アップロード] 試行 {attempt + 1}/{max_retries}')
-            
-            cnopts = pysftp.CnOpts()
-            cnopts.hostkeys = None
-            
-            with pysftp.Connection(
-                host=ftp_host.strip(),
-                username=ftp_user.strip(),
-                password=ftp_pass.strip(),
-                port=22,
-                cnopts=cnopts
-            ) as sftp:
-                sftp.cwd(ftp_path.strip())
-                sftp.put(filepath, filename)
-            
-            logger.info(f'✓ アップロード成功: {filename}')
-            return True, None
-            
-        except Exception as e:
-            logger.warning(f'試行 {attempt + 1} 失敗: {str(e)}')
-            
-            if attempt < max_retries - 1:
-                wait_time = (attempt + 1) * 5  # 5秒、10秒、15秒と待機時間を増やす
-                logger.info(f'{wait_time}秒待機してリトライします...')
-                time.sleep(wait_time)
-            else:
-                logger.error(f'✗ 全ての試行が失敗: {filename}')
-                return False, str(e)
-    
-    return False, 'リトライ回数超過'
 
 # データベース初期化
 def init_db():
@@ -113,26 +76,29 @@ def check_and_execute_schedules():
             ftp_path = schedule[6]
             filename = schedule[1]
             
-            logger.info(f'[デバッグ] ファイル: {filename}')
-            logger.info(f'[デバッグ] ホスト: {ftp_host}')
-            logger.info(f'[デバッグ] ユーザー: {ftp_user}')
-            logger.info(f'[デバッグ] パスワード長: {len(ftp_pass)} 文字')
-            logger.info(f'[デバッグ] パス: {ftp_path}')
-            
-            # リトライ機能付きアップロード
-            success, error = upload_with_retry(
-                ftp_host, ftp_user, ftp_pass, ftp_path, filepath, filename
-            )
-            
-            if success:
+            try:
+                cnopts = pysftp.CnOpts()
+                cnopts.hostkeys = None
+                
+                with pysftp.Connection(
+                    host=ftp_host.strip(),
+                    username=ftp_user.strip(),
+                    password=ftp_pass.strip(),
+                    port=22,
+                    cnopts=cnopts
+                ) as sftp:
+                    sftp.cwd(ftp_path.strip())
+                    sftp.put(filepath, filename)
+                
                 c.execute('UPDATE schedules SET status = "completed" WHERE id = ?', (schedule_id,))
                 conn.commit()
                 logger.info(f'✓ スケジュール実行成功: {filename}')
-            else:
-                error_msg = f'エラー: {error}'
+                
+            except Exception as e:
+                error_msg = f'エラー: {str(e)}'
                 c.execute('UPDATE schedules SET status = ? WHERE id = ?', (error_msg, schedule_id))
                 conn.commit()
-                logger.error(f'✗ スケジュール実行失敗: {filename} - {error}')
+                logger.error(f'✗ スケジュール実行失敗: {filename} - {str(e)}')
         
         conn.close()
         logger.info('=' * 60)
@@ -245,17 +211,26 @@ def execute_now():
             ftp_path = schedule[6]
             filename = schedule[1]
             
-            # リトライ機能付きアップロード
-            success, error = upload_with_retry(
-                ftp_host, ftp_user, ftp_pass, ftp_path, filepath, filename
-            )
-            
-            if success:
+            try:
+                cnopts = pysftp.CnOpts()
+                cnopts.hostkeys = None
+                
+                with pysftp.Connection(
+                    host=ftp_host.strip(),
+                    username=ftp_user.strip(),
+                    password=ftp_pass.strip(),
+                    port=22,
+                    cnopts=cnopts
+                ) as sftp:
+                    sftp.cwd(ftp_path.strip())
+                    sftp.put(filepath, filename)
+                
                 results.append(f'✓ {filename} アップロード完了')
                 c.execute('UPDATE schedules SET status = "completed" WHERE id = ?', (schedule_id,))
                 conn.commit()
-            else:
-                error_msg = f'エラー: {error}'
+                
+            except Exception as e:
+                error_msg = f'エラー: {str(e)}'
                 c.execute('UPDATE schedules SET status = ? WHERE id = ?', (error_msg, schedule_id))
                 conn.commit()
                 results.append(f'✗ {filename} {error_msg}')
