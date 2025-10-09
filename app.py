@@ -42,6 +42,28 @@ def init_db():
 
 init_db()
 
+# 全スケジュール削除エンドポイント
+@app.route('/clear_all', methods=['POST'])
+def clear_all():
+    try:
+        conn = sqlite3.connect('schedules.db')
+        c = conn.cursor()
+        c.execute('DELETE FROM schedules')
+        conn.commit()
+        conn.close()
+        
+        logger.info('全てのスケジュールを削除しました')
+        
+        return jsonify({
+            'success': True,
+            'message': '全てのスケジュールを削除しました'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'エラー: {str(e)}'
+        })
+
 # スケジュール実行関数
 def check_and_execute_schedules():
     try:
@@ -75,6 +97,12 @@ def check_and_execute_schedules():
             ftp_pass = schedule[5]
             ftp_path = schedule[6]
             filename = schedule[1]
+            
+            logger.info(f'[実行] ファイル: {filename}')
+            logger.info(f'[実行] ホスト: {ftp_host}')
+            logger.info(f'[実行] ユーザー: {ftp_user}')
+            logger.info(f'[実行] パスワード長: {len(ftp_pass)}')
+            logger.info(f'[実行] パス: {ftp_path}')
             
             try:
                 cnopts = pysftp.CnOpts()
@@ -135,10 +163,35 @@ def upload():
         file.save(filepath)
         
         schedule_time = request.form['schedule_time']
-        ftp_host = request.form['ftp_host']
-        ftp_user = request.form['ftp_user']
-        ftp_pass = request.form['ftp_pass']
-        ftp_path = request.form['ftp_path']
+        ftp_host = request.form.get('ftp_host', '').strip()
+        ftp_user = request.form.get('ftp_user', '').strip()
+        ftp_pass = request.form.get('ftp_pass', '').strip()
+        ftp_path = request.form.get('ftp_path', '').strip()
+        
+        # ★★★ 詳細なデバッグログ ★★★
+        logger.info('=' * 60)
+        logger.info('[フォーム受信]')
+        logger.info(f'ホスト: "{ftp_host}" (長さ: {len(ftp_host)})')
+        logger.info(f'ユーザー: "{ftp_user}" (長さ: {len(ftp_user)})')
+        logger.info(f'パスワード長: {len(ftp_pass)}')
+        if len(ftp_pass) > 0:
+            logger.info(f'パスワード先頭: {ftp_pass[0]}')
+            logger.info(f'パスワード末尾: {ftp_pass[-1]}')
+        logger.info(f'パス: "{ftp_path}" (長さ: {len(ftp_path)})')
+        logger.info('=' * 60)
+        
+        # 空欄チェック
+        if not ftp_user:
+            return jsonify({
+                'success': False,
+                'message': 'FTPユーザー名が入力されていません'
+            })
+        
+        if not ftp_pass:
+            return jsonify({
+                'success': False,
+                'message': 'FTPパスワードが入力されていません'
+            })
         
         conn = sqlite3.connect('schedules.db')
         c = conn.cursor()
@@ -164,7 +217,7 @@ def upload():
         })
         
     except Exception as e:
-        logger.error(f'アップロードエラー: {str(e)}')
+        logger.error(f'アップロードエラー: {str(e)}', exc_info=True)
         return jsonify({
             'success': False,
             'message': str(e)
@@ -202,6 +255,8 @@ def execute_now():
         schedules = c.fetchall()
         results = []
         
+        logger.info(f'[今すぐ実行] 対象: {len(schedules)}件')
+        
         for schedule in schedules:
             schedule_id = schedule[0]
             filepath = schedule[2]
@@ -210,6 +265,10 @@ def execute_now():
             ftp_pass = schedule[5]
             ftp_path = schedule[6]
             filename = schedule[1]
+            
+            logger.info(f'[今すぐ実行] ファイル: {filename}')
+            logger.info(f'[今すぐ実行] ユーザー: {ftp_user}')
+            logger.info(f'[今すぐ実行] パスワード長: {len(ftp_pass)}')
             
             try:
                 cnopts = pysftp.CnOpts()
@@ -249,6 +308,7 @@ def execute_now():
         })
         
     except Exception as e:
+        logger.error(f'今すぐ実行エラー: {str(e)}', exc_info=True)
         return jsonify({
             'success': False,
             'message': f'エラー: {str(e)}'
